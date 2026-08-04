@@ -5087,12 +5087,12 @@
       const meanMotionRadSec = Math.sqrt(mu / Math.pow(semiMajorAxisKm, 3));
       const meanMotionRevDay = meanMotionRadSec * 86400 / (2 * Math.PI);
 
-      const secondsToAos = 10;
+      const secondsToAos = 3 * 60;
       const aosDate = new Date(baseDate.getTime() + secondsToAos * 1000);
 
       /*
         SAT1開発試験用TLE：
-        - 表示上のAOSはEl 5degで、約10秒後に来るようにする
+        - 表示上のAOSはEl 5degで、約3分後に来るようにする
         - その後、地上局のほぼ真上を通るようにして最大El 70deg以上を満たしやすくする
         - 高度540km / 軌道傾斜角98deg / 円軌道近似
         - TLE epochは現在時刻 baseDate
