@@ -2414,9 +2414,8 @@
     const PASS_MIN_MAX_ELEVATION_DEG = AOS_LOS_ELEVATION_THRESHOLD_DEG;
     const TRACKING_DISPLAY_MIN_ELEVATION_DEG = 0;
 
-    // テレメトリ・受信パケット等を画面に反映する最低仰角。
-    // 見た目のレイアウトは変えず、内部的にEl 30deg未満では受信データを表示しない。
-    const TELEMETRY_DISPLAY_MIN_ELEVATION_DEG = 0;
+    // 実機のWeb Serial受信は軌道計算と独立させる。
+    // ベンチ試験中も、ポートへ到着したデータは常に表示する。
 
     /* =========================
        XBee Serial Port
@@ -2426,7 +2425,7 @@
     let xbeeWriter = null;
     let serialPortSelectionInProgress = false;
 
-    const XBEE_BAUD_RATE = 9600;
+    const XBEE_BAUD_RATE = 38400;
     const USE_BACKEND_COMMAND_API = false;
     const RECEIVER_START_API_URL = "http://127.0.0.1:8765/start-receiver";
     const COMMAND_API_URL = "http://127.0.0.1:8765/send-command";
@@ -2715,9 +2714,7 @@
       const magXRaw = hasMissionTelemetry ? readInt16BE(payload[17], payload[18]) : null;
       const magYRaw = hasMissionTelemetry ? readInt16BE(payload[19], payload[20]) : null;
       const magZRaw = hasMissionTelemetry ? readInt16BE(payload[21], payload[22]) : null;
-      const adcRes = 4096;
-      const adcVref = 3.3;
-      const voltageV = voltageRaw / adcRes * adcVref * 1.431;
+      const voltageV = voltageRaw / 1000;
 
 
       return {
@@ -2733,17 +2730,17 @@
         temperatureC: temperatureRaw / 10,
         temperatureHex: `${byteToHex(payload[3])} ${byteToHex(payload[4])}`,
 
-        accX: accXRaw === null ? null : accXRaw / 512 * 9.8,
-        accY: accYRaw === null ? null : accYRaw / 512 * 9.8,
-        accZ: accZRaw === null ? null : accZRaw / 512 * 9.8,
+        accX: accXRaw === null ? null : accXRaw / 100,
+        accY: accYRaw === null ? null : accYRaw / 100,
+        accZ: accZRaw === null ? null : accZRaw / 100,
 
-        gyroX: gyroXRaw === null ? null : gyroXRaw * 125 / 2048,
-        gyroY: gyroYRaw === null ? null : gyroYRaw * 125 / 2048,
-        gyroZ: gyroZRaw === null ? null : gyroZRaw * 125 / 2048,
+        gyroX: gyroXRaw === null ? null : gyroXRaw / 10,
+        gyroY: gyroYRaw === null ? null : gyroYRaw / 10,
+        gyroZ: gyroZRaw === null ? null : gyroZRaw / 10,
 
-        magX: magXRaw,
-        magY: magYRaw,
-        magZ: magZRaw
+        magX: magXRaw === null ? null : magXRaw / 10,
+        magY: magYRaw === null ? null : magYRaw / 10,
+        magZ: magZRaw === null ? null : magZRaw / 10
       };
     }
 
@@ -2774,7 +2771,7 @@
       updateTelemetryStatusDisplays(decoded);
 
       setTelemetryText(packetUi.tmVoltageValue, `${decoded.voltageV.toFixed(2)} V`);
-      setTelemetryText(packetUi.tmVoltageRaw, `raw: ${decoded.voltageHex} = ${decoded.voltageRaw} ADC`);
+      setTelemetryText(packetUi.tmVoltageRaw, `raw: ${decoded.voltageHex} = ${decoded.voltageRaw} mV`);
       setTelemetryText(packetUi.tmTempValue, `${decoded.temperatureC.toFixed(1)} °C`);
       setTelemetryText(packetUi.tmTempRaw, `raw: ${decoded.temperatureHex} = ${decoded.temperatureRaw} /10`);
 
@@ -2895,15 +2892,11 @@
       const line = String(text || "").trim();
       if (!line) return false;
 
-      const match = line.match(/^(V|T|TEMP|AX|AY|AZ|GX|GY|GZ|MX|MY|MZ|NUM)\s*=\s*([-+]?\d+(?:\.\d+)?)$/i);
-      if (!match) return false;
-
-      const key = match[1].toUpperCase();
-      const value = Number(match[2]);
-      if (!Number.isFinite(value)) return false;
-
       const keyMap = {
         V: "voltageV",
+        BUS: "voltageV",
+        VBAT: "voltageV",
+        VOLTAGE: "voltageV",
         T: "temperatureC",
         TEMP: "temperatureC",
         AX: "accX",
@@ -2918,7 +2911,24 @@
         NUM: "receivedNumber"
       };
 
-      backendTelemetryState[keyMap[key]] = value;
+      // Lab5-03 sends one CRLF-terminated CSV-style line:
+      // TEMP=23.40,BUS=3.780,V5=...,V3V3=...,...
+      // Flightware variants may send V/TEMP/AX/... either one per line or
+      // together on the same line. Parse every supported assignment and
+      // intentionally ignore unrelated Lab5-03 EPS fields such as V5/ISOL.
+      const fieldPattern = /(?:^|[,\s:])(VOLTAGE|VBAT|TEMP|BUS|NUM|AX|AY|AZ|GX|GY|GZ|MX|MY|MZ|V|T)\s*=\s*([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)/gi;
+      let matched = false;
+      let match;
+
+      while ((match = fieldPattern.exec(line)) !== null) {
+        const stateKey = keyMap[match[1].toUpperCase()];
+        const value = Number(match[2]);
+        if (!stateKey || !Number.isFinite(value)) continue;
+        backendTelemetryState[stateKey] = value;
+        matched = true;
+      }
+
+      if (!matched) return false;
 
       updateTelemetryDisplayFromObject(backendTelemetryState);
       return true;
@@ -3024,8 +3034,9 @@
     }
 
     function isTelemetryDisplayAllowed() {
-      const elevationDeg = getCurrentSatelliteElevationDegForTelemetryGate();
-      return elevationDeg !== null && elevationDeg >= AOS_LOS_ELEVATION_THRESHOLD_DEG;
+      // HEPTA Serial Monitorと同様、実際に届いたシリアルデータを優先する。
+      // 仰角は軌道表示にのみ使い、実機受信データの表示を抑止しない。
+      return isReceiverConnected();
     }
 
     function clearTelemetryReceiveDisplaysForLowElevation() {
@@ -3728,15 +3739,22 @@
       if (!text) return;
 
       serialTextBuffer += text;
+      // A missing newline must not grow the browser memory indefinitely.
+      if (serialTextBuffer.length > 8192) {
+        serialTextBuffer = serialTextBuffer.slice(-8192);
+      }
       updateRssiFromReceivedText(text);
       const telemetryAllowed = isTelemetryDisplayAllowed();
 
-      const lines = serialTextBuffer.split(/\r?\n/);
+      // Web Serial read() boundaries are arbitrary. XBee can split a single
+      // Lab5-03 line across several chunks, so keep the incomplete tail until
+      // LF arrives (same approach as HEPTA-SAT-Serial_Monitor ByteLineBuffer).
+      const lines = serialTextBuffer.split("\n");
       serialTextBuffer = lines.pop() || "";
 
       let counted = 0;
       lines.forEach(line => {
-        const trimmed = line.trim();
+        const trimmed = line.replace(/\r$/, "").trim();
         if (trimmed.length > 0) {
           feedHexTextPacketStream(trimmed);
           if (telemetryAllowed) updateTelemetryDisplayFromBackendText(trimmed);
@@ -3744,15 +3762,6 @@
           counted += 1;
         }
       });
-
-      // 改行なしのデータでも、受信チャンクが来たことはカウントできるようにする。
-      if (counted === 0 && text.trim().length > 0 && serialTextBuffer.length > 0) {
-        feedHexTextPacketStream(serialTextBuffer);
-        if (telemetryAllowed) updateTelemetryDisplayFromBackendText(serialTextBuffer);
-        updateCommandAckLog(serialTextBuffer);
-        counted = 1;
-        serialTextBuffer = "";
-      }
 
       for (let i = 0; i < counted; i++) incrementRxCommandCount();
     }
@@ -4403,7 +4412,7 @@
 
         updatePortStatus("connected", "接続中");
         selectedPortName.textContent = portName;
-        updateFooterPort(`${portName} / 9600 bps`);
+        updateFooterPort(`${portName} / ${XBEE_BAUD_RATE} bps`);
         startSimulatedRssi();
         startXbeeReadLoop();
         return true;
