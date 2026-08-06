@@ -38,8 +38,8 @@ ChromeまたはEdgeで `http://localhost:8080/` を開きます。
 
 ## テレメトリ通信仕様
 
-Web SerialとXBee UARTは参照Flight Softwareと同じ **9600 baud** です。機体側・地上局側XBeeは
-`AP=0`（Transparent mode）、`BD=3`（9600 baud）に設定してください。
+Web SerialとXBee UARTは現在のHEPTA XBeeペアと同じ **38400 baud** です。機体側・地上局側XBeeは
+`AP=0`（Transparent mode）、`BD=5`（38400 baud）に設定してください。30バイトのパケット形式と換算式は参照Flight Softwareと同一です。
 
 受信処理はHEPTA-SAT Serial Monitorと同様に、Web Serialの任意の受信チャンクを
 改行まで蓄積してから解析します。Lab5-03の
