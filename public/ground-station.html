@@ -2425,7 +2425,7 @@
     let xbeeWriter = null;
     let serialPortSelectionInProgress = false;
 
-    const XBEE_BAUD_RATE = 38400;
+    const XBEE_BAUD_RATE = 9600;
     const USE_BACKEND_COMMAND_API = false;
     const RECEIVER_START_API_URL = "http://127.0.0.1:8765/start-receiver";
     const COMMAND_API_URL = "http://127.0.0.1:8765/send-command";
@@ -2516,10 +2516,10 @@
     const TELEMETRY_PACKET = {
       // 全体形式：7E | Sat ID | Type | Seq(2B) | Len | Payload | Checksum
       // HK Payload：
-      //   Mode(1B) | Voltage[mV](2B) | Temperature[0.1 degC](2B)
-      //   Acc XYZ[0.01 m/s^2](int16 x3)
-      //   Gyro XYZ[0.1 deg/s](int16 x3)
-      //   Mag XYZ[0.1 uT](int16 x3)
+      //   Mode(1B) | Voltage ADC count(2B) | Temperature[0.1 degC](2B)
+      //   Acc XYZ[512 count/g](int16 x3)
+      //   Gyro XYZ[2048/125 count/(deg/s)](int16 x3)
+      //   Mag XYZ[uT integer](int16 x3)
       // Payload length = 5 byte (basic) or 23 byte (mission)
       header: 0x7E,
       satId: 0x01,
@@ -2690,11 +2690,11 @@
     function decodeHkPayload(payload, packetType = TELEMETRY_PACKET.typeHk) {
       // HK Telemetry payload format（教材用）
       // Payload[0]    : 運用モード 0x00=Standby, 0x01=Mission
-      // Payload[1-2]  : 電圧 mV, uint16, big-endian 例 3.89 V = 3890 = 0x0F32
+      // Payload[1-2]  : 電圧 ADC count, uint16, big-endian
       // Payload[3-4]  : 温度 0.1 degC, int16, big-endian 例 23.2 degC = 232 = 0x00E8
-      // Payload[5-10] : 加速度XYZ 0.01 m/s^2, int16 x3
-      // Payload[11-16]: 角速度XYZ 0.1 deg/s, int16 x3
-      // Payload[17-22]: 地磁気XYZ 0.1 uT, int16 x3
+      // Payload[5-10] : 加速度XYZ 512 count/g, int16 x3
+      // Payload[11-16]: 角速度XYZ 2048/125 count/(deg/s), int16 x3
+      // Payload[17-22]: 地磁気XYZ uT integer, int16 x3
       if (!payload || payload.length < TELEMETRY_PACKET.basicPayloadLength) return null;
 
       const packetTypeMode = decodePacketTypeMode(packetType);
@@ -2714,7 +2714,7 @@
       const magXRaw = hasMissionTelemetry ? readInt16BE(payload[17], payload[18]) : null;
       const magYRaw = hasMissionTelemetry ? readInt16BE(payload[19], payload[20]) : null;
       const magZRaw = hasMissionTelemetry ? readInt16BE(payload[21], payload[22]) : null;
-      const voltageV = voltageRaw / 1000;
+      const voltageV = voltageRaw * (3.3 * 1.431) / 4096;
 
 
       return {
@@ -2730,17 +2730,17 @@
         temperatureC: temperatureRaw / 10,
         temperatureHex: `${byteToHex(payload[3])} ${byteToHex(payload[4])}`,
 
-        accX: accXRaw === null ? null : accXRaw / 100,
-        accY: accYRaw === null ? null : accYRaw / 100,
-        accZ: accZRaw === null ? null : accZRaw / 100,
+        accX: accXRaw === null ? null : accXRaw * 9.8 / 512,
+        accY: accYRaw === null ? null : accYRaw * 9.8 / 512,
+        accZ: accZRaw === null ? null : accZRaw * 9.8 / 512,
 
-        gyroX: gyroXRaw === null ? null : gyroXRaw / 10,
-        gyroY: gyroYRaw === null ? null : gyroYRaw / 10,
-        gyroZ: gyroZRaw === null ? null : gyroZRaw / 10,
+        gyroX: gyroXRaw === null ? null : gyroXRaw * 125 / 2048,
+        gyroY: gyroYRaw === null ? null : gyroYRaw * 125 / 2048,
+        gyroZ: gyroZRaw === null ? null : gyroZRaw * 125 / 2048,
 
-        magX: magXRaw === null ? null : magXRaw / 10,
-        magY: magYRaw === null ? null : magYRaw / 10,
-        magZ: magZRaw === null ? null : magZRaw / 10
+        magX: magXRaw,
+        magY: magYRaw,
+        magZ: magZRaw
       };
     }
 
@@ -2771,7 +2771,7 @@
       updateTelemetryStatusDisplays(decoded);
 
       setTelemetryText(packetUi.tmVoltageValue, `${decoded.voltageV.toFixed(2)} V`);
-      setTelemetryText(packetUi.tmVoltageRaw, `raw: ${decoded.voltageHex} = ${decoded.voltageRaw} mV`);
+      setTelemetryText(packetUi.tmVoltageRaw, `raw: ${decoded.voltageHex} = ${decoded.voltageRaw} ADC`);
       setTelemetryText(packetUi.tmTempValue, `${decoded.temperatureC.toFixed(1)} °C`);
       setTelemetryText(packetUi.tmTempRaw, `raw: ${decoded.temperatureHex} = ${decoded.temperatureRaw} /10`);
 
