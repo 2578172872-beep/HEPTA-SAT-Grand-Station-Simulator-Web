@@ -4179,7 +4179,7 @@
 
         updatePortStatus("connected", "Python接続中");
         backendReceiverConnected = true;
-        updateFooterPort("Python Backend / 9600 bps");
+        updateFooterPort(`Python Backend / ${XBEE_BAUD_RATE} bps`);
         updateTelemetryReceiveGate();
         return true;
       } catch (error) {
